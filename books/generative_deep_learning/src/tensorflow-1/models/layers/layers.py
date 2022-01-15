@@ -3,7 +3,7 @@
 import tensorflow as tf
 import keras
 
-from tensorflow.keras.layers import Layer, InputSpec
+from keras.layers import Layer, InputSpec
 import keras.backend as K
 
 class ReflectionPadding2D(Layer):

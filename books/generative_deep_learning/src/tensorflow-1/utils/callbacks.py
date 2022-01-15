@@ -12,7 +12,7 @@ class CustomCallback(Callback):
         self.print_every_n_batches = print_every_n_batches
         self.vae = vae
 
-    def on_train_batch_end(self, batch, logs={}):  
+    def on_batch_end(self, batch, logs={}):  
         if batch % self.print_every_n_batches == 0:
             z_new = np.random.normal(size = (1,self.vae.z_dim))
             reconst = self.vae.decoder.predict(np.array(z_new))[0].squeeze()

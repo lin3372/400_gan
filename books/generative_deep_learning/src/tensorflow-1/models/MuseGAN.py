@@ -1,16 +1,13 @@
 
-from tensorflow.keras.layers import Input, Conv2D, Flatten, Dense, Conv2DTranspose, Reshape, Lambda, Activation, BatchNormalization, LeakyReLU, Dropout, ZeroPadding2D, UpSampling2D, Reshape, Permute, RepeatVector, Concatenate, Conv3D
-from tensorflow.keras.layers import Layer
+from keras.layers import Input, Conv2D, Flatten, Dense, Conv2DTranspose, Reshape, Lambda, Activation, BatchNormalization, LeakyReLU, Dropout, ZeroPadding2D, UpSampling2D, Reshape, Permute, RepeatVector, Concatenate, Conv3D
+from keras.layers.merge import _Merge
 
-from tensorflow.keras.models import Model, Sequential
-from tensorflow.keras import backend as K
-from tensorflow.keras.optimizers import Adam, RMSprop
-from tensorflow.keras.callbacks import ModelCheckpoint 
-from tensorflow.keras.utils import plot_model
-from tensorflow.keras.initializers import RandomNormal
-
-import tensorflow as tf
-tf.compat.v1.disable_eager_execution()
+from keras.models import Model, Sequential
+from keras import backend as K
+from keras.optimizers import Adam, RMSprop
+from keras.callbacks import ModelCheckpoint 
+from keras.utils import plot_model
+from keras.initializers import RandomNormal
 
 from functools import partial
 
@@ -23,17 +20,14 @@ import matplotlib.pyplot as plt
 from music21 import midi
 from music21 import note, stream, duration, tempo
 
-def grad(y, x):
-    V = Lambda(lambda z: K.gradients(
-        z[0], z[1]), output_shape=[1])([y, x])
-    return V
 
-class RandomWeightedAverage(Layer):
+
+class RandomWeightedAverage(_Merge):
     def __init__(self, batch_size):
         super().__init__()
         self.batch_size = batch_size
     """Provides a (random) weighted average between real and generated image samples"""
-    def call(self, inputs):
+    def _merge_function(self, inputs):
         alpha = K.random_uniform((self.batch_size, 1, 1, 1, 1))
         return (alpha * inputs[0]) + ((1 - alpha) * inputs[1])
 
@@ -86,7 +80,7 @@ class MuseGAN():
         """
         Computes gradient penalty based on prediction and weighted real / fake samples
         """
-        gradients = grad(y_pred, interpolated_samples)[0]
+        gradients = K.gradients(y_pred, interpolated_samples)[0]
 
         # compute the euclidean norm by squaring ...
         gradients_sqr = K.square(gradients)
@@ -211,6 +205,7 @@ class MuseGAN():
 
         # CHORDS -> TEMPORAL NETWORK
         self.chords_tempNetwork = self.TemporalNetwork()
+        self.chords_tempNetwork.name = 'temporal_network'
         chords_over_time = self.chords_tempNetwork(chords_input) # [n_bars, z_dim]
         
         # MELODY -> TEMPORAL NETWORK
@@ -436,7 +431,7 @@ class MuseGAN():
 
         np.save(os.path.join(run_folder, "images/sample_%d.npy" % self.epoch), gen_scores)
 
-        self.notes_to_midi(run_folder, gen_scores)
+        self.notes_to_midi(run_folder, gen_scores, 0)
 
 
     def binarise_output(self, output):
@@ -517,6 +512,7 @@ class MuseGAN():
         self.model.save(os.path.join(run_folder, 'model.h5'))
         self.critic.save(os.path.join(run_folder, 'critic.h5'))
         self.generator.save(os.path.join(run_folder, 'generator.h5'))
+        # pickle.dump(self, open( os.path.join(run_folder, "obj.pkl"), "wb" ))
 
     def load_weights(self, run_folder, epoch=None):
 

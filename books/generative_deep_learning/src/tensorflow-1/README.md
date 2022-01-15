@@ -7,9 +7,9 @@ https://learning.oreilly.com/library/view/generative-deep-learning/9781492041931
 
 https://www.amazon.com/Generative-Deep-Learning-Teaching-Machines/dp/1492041947/ref=sr_1_1
 
-## Tensorflow 2.0
+## Tensorflow
 
-This branch uses Keras within Tensorflow 2.0.
+This branch uses standalone Keras with a Tensorflow 1.14 backend. See the `tensorflow_2` branch for the Keras within Tensorflow 2.0 version of the codebase.
 
 ## Structure
 
