@@ -1,12 +1,10 @@
 
-from tensorflow.keras.layers import Input, Conv2D, Flatten, Dense, Conv2DTranspose, Reshape, Lambda, Activation, BatchNormalization, LeakyReLU, Dropout, Layer
+from tensorflow.keras.layers import Input, Conv2D, Flatten, Dense, Conv2DTranspose, Reshape, Lambda, Activation, BatchNormalization, LeakyReLU, Dropout
 from tensorflow.keras.models import Model
 from tensorflow.keras import backend as K
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import ModelCheckpoint 
 from tensorflow.keras.utils import plot_model
-
-import tensorflow as tf
 
 from utils.callbacks import CustomCallback, step_decay_schedule 
 
@@ -14,49 +12,6 @@ import numpy as np
 import json
 import os
 import pickle
-
-class Sampling(Layer):
-    def call(self, inputs):
-        mu, log_var = inputs
-        epsilon = K.random_normal(shape=K.shape(mu), mean=0., stddev=1.)
-        return mu + K.exp(log_var / 2) * epsilon
-
-
-class VAEModel(Model):
-    def __init__(self, encoder, decoder, r_loss_factor, **kwargs):
-        super(VAEModel, self).__init__(**kwargs)
-        self.encoder = encoder
-        self.decoder = decoder
-        self.r_loss_factor = r_loss_factor
-
-    def train_step(self, data):
-        if isinstance(data, tuple):
-            data = data[0]
-        with tf.GradientTape() as tape:
-            z_mean, z_log_var, z = self.encoder(data)
-            reconstruction = self.decoder(z)
-            reconstruction_loss = tf.reduce_mean(
-                tf.square(data - reconstruction), axis = [1,2,3]
-            )
-            reconstruction_loss *= self.r_loss_factor
-            kl_loss = 1 + z_log_var - tf.square(z_mean) - tf.exp(z_log_var)
-            kl_loss = tf.reduce_sum(kl_loss, axis = 1)
-            kl_loss *= -0.5
-            total_loss = reconstruction_loss + kl_loss
-        grads = tape.gradient(total_loss, self.trainable_weights)
-        self.optimizer.apply_gradients(zip(grads, self.trainable_weights))
-        return {
-            "loss": total_loss,
-            "reconstruction_loss": reconstruction_loss,
-            "kl_loss": kl_loss,
-        }
-
-    def call(self,inputs):
-        latent = self.encoder(inputs)
-        return self.decoder(latent)
-
-
-
 
 
 class VariationalAutoencoder():
@@ -69,7 +24,6 @@ class VariationalAutoencoder():
         , decoder_conv_t_kernel_size
         , decoder_conv_t_strides
         , z_dim
-        , r_loss_factor
         , use_batch_norm = False
         , use_dropout= False
         ):
@@ -84,7 +38,6 @@ class VariationalAutoencoder():
         self.decoder_conv_t_kernel_size = decoder_conv_t_kernel_size
         self.decoder_conv_t_strides = decoder_conv_t_strides
         self.z_dim = z_dim
-        self.r_loss_factor = r_loss_factor
 
         self.use_batch_norm = use_batch_norm
         self.use_dropout = use_dropout
@@ -126,9 +79,16 @@ class VariationalAutoencoder():
         self.mu = Dense(self.z_dim, name='mu')(x)
         self.log_var = Dense(self.z_dim, name='log_var')(x)
 
-        self.z = Sampling(name='encoder_output')([self.mu, self.log_var])
+        self.encoder_mu_log_var = Model(encoder_input, (self.mu, self.log_var))
 
-        self.encoder = Model(encoder_input, [self.mu, self.log_var, self.z], name = 'encoder')
+        def sampling(args):
+            mu, log_var = args
+            epsilon = K.random_normal(shape=K.shape(mu), mean=0., stddev=1.)
+            return mu + K.exp(log_var / 2) * epsilon
+
+        encoder_output = Lambda(sampling, name='encoder_output')([self.mu, self.log_var])
+
+        self.encoder = Model(encoder_input, encoder_output)
         
         
 
@@ -163,18 +123,34 @@ class VariationalAutoencoder():
 
         decoder_output = x
 
-        self.decoder = Model(decoder_input, decoder_output, name = 'decoder')
+        self.decoder = Model(decoder_input, decoder_output)
 
         ### THE FULL VAE
+        model_input = encoder_input
+        model_output = self.decoder(encoder_output)
 
-        self.model = VAEModel(self.encoder, self.decoder, self.r_loss_factor)
+        self.model = Model(model_input, model_output)
 
 
-
-    def compile(self, learning_rate):
+    def compile(self, learning_rate, r_loss_factor):
         self.learning_rate = learning_rate
+
+        ### COMPILATION
+        def vae_r_loss(y_true, y_pred):
+            r_loss = K.mean(K.square(y_true - y_pred), axis = [1,2,3])
+            return r_loss_factor * r_loss
+
+        def vae_kl_loss(y_true, y_pred):
+            kl_loss =  -0.5 * K.sum(1 + self.log_var - K.square(self.mu) - K.exp(self.log_var), axis = 1)
+            return kl_loss
+
+        def vae_loss(y_true, y_pred):
+            r_loss = vae_r_loss(y_true, y_pred)
+            kl_loss = vae_kl_loss(y_true, y_pred)
+            return  r_loss + kl_loss
+
         optimizer = Adam(lr=learning_rate)
-        self.model.compile(optimizer=optimizer)
+        self.model.compile(optimizer=optimizer, loss = vae_loss,  metrics = [vae_r_loss, vae_kl_loss])
 
 
     def save(self, folder):
@@ -240,9 +216,8 @@ class VariationalAutoencoder():
         callbacks_list = [checkpoint1, checkpoint2, custom_callback, lr_sched]
 
         self.model.save_weights(os.path.join(run_folder, 'weights/weights.h5'))
-
-
-        self.model.fit(
+                
+        self.model.fit_generator(  #self.model.fit_generator(
             data_flow
             , shuffle = True
             , epochs = epochs
@@ -250,8 +225,6 @@ class VariationalAutoencoder():
             , callbacks = callbacks_list
             , steps_per_epoch=steps_per_epoch 
             )
-
-
 
 
     
